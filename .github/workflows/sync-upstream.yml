@@ -8,6 +8,7 @@ on:
 
 permissions:
   contents: write
+  issues: write
 
 jobs:
   sync:
@@ -23,7 +24,7 @@ jobs:
       - name: Add upstream remote
         run: |
           git remote add upstream https://github.com/tw93/Mole.git || true
-          git fetch upstream
+          git fetch upstream --tags
 
       - name: Check for new commits
         id: check
@@ -35,8 +36,138 @@ jobs:
             echo "Fork is already up to date"
           else
             echo "already_synced=false" >> $GITHUB_OUTPUT
+            echo "commit_range=${LOCAL}..${UPSTREAM}" >> $GITHUB_OUTPUT
             echo "New upstream commits detected"
           fi
+
+      - name: Generate change report
+        if: steps.check.outputs.already_synced == 'false'
+        id: report
+        run: |
+          RANGE="${{ steps.check.outputs.commit_range }}"
+          LATEST_TAG=$(git describe --tags --abbrev=0 upstream/main 2>/dev/null || echo "unknown")
+
+          # Collect changed files
+          CHANGED_FILES=$(git diff --name-only $RANGE)
+          COMMIT_LOG=$(git log --oneline --no-merges $RANGE)
+          COMMIT_COUNT=$(git rev-list --count --no-merges $RANGE)
+
+          # Detect what areas changed
+          GUI_UPDATE_NEEDED="false"
+          GUI_REASONS=""
+
+          # Check files that directly affect GUI commands
+          # The moleapp GUI uses: clean, clean --dry-run, optimize, uninstall --app
+          if echo "$CHANGED_FILES" | grep -q "^bin/clean\.sh"; then
+            GUI_UPDATE_NEEDED="true"
+            GUI_REASONS="${GUI_REASONS}- \`bin/clean.sh\` changed (used by Clean page)\n"
+          fi
+          if echo "$CHANGED_FILES" | grep -q "^lib/clean/"; then
+            GUI_UPDATE_NEEDED="true"
+            GUI_REASONS="${GUI_REASONS}- \`lib/clean/\` changed (used by Clean page)\n"
+          fi
+          if echo "$CHANGED_FILES" | grep -q "^bin/optimize\.sh"; then
+            GUI_UPDATE_NEEDED="true"
+            GUI_REASONS="${GUI_REASONS}- \`bin/optimize.sh\` changed (used by Optimize page)\n"
+          fi
+          if echo "$CHANGED_FILES" | grep -q "^lib/optimize/"; then
+            GUI_UPDATE_NEEDED="true"
+            GUI_REASONS="${GUI_REASONS}- \`lib/optimize/\` changed (used by Optimize page)\n"
+          fi
+          if echo "$CHANGED_FILES" | grep -q "^bin/uninstall\.sh"; then
+            GUI_UPDATE_NEEDED="true"
+            GUI_REASONS="${GUI_REASONS}- \`bin/uninstall.sh\` changed (used by Uninstall page)\n"
+          fi
+          if echo "$CHANGED_FILES" | grep -q "^lib/uninstall/"; then
+            GUI_UPDATE_NEEDED="true"
+            GUI_REASONS="${GUI_REASONS}- \`lib/uninstall/\` changed (used by Uninstall page)\n"
+          fi
+          if echo "$CHANGED_FILES" | grep -q "^bin/purge\.sh"; then
+            GUI_UPDATE_NEEDED="true"
+            GUI_REASONS="${GUI_REASONS}- \`bin/purge.sh\` changed (used by Purge page)\n"
+          fi
+          if echo "$CHANGED_FILES" | grep -q "^mole$"; then
+            GUI_UPDATE_NEEDED="true"
+            GUI_REASONS="${GUI_REASONS}- Main \`mole\` script changed (core entry point)\n"
+          fi
+          if echo "$CHANGED_FILES" | grep -q "^lib/core/"; then
+            GUI_UPDATE_NEEDED="true"
+            GUI_REASONS="${GUI_REASONS}- \`lib/core/\` changed (shared core libraries)\n"
+          fi
+
+          # Check for new subcommands added to the main mole script
+          NEW_COMMANDS=""
+          if echo "$CHANGED_FILES" | grep -q "^mole$"; then
+            NEW_COMMANDS=$(git diff $RANGE -- mole | grep "^+" | grep -oP '(?<=")[a-z][-a-z]*(?="\))' || true)
+          fi
+
+          # Check for Go source changes (analyze/status TUI apps)
+          GO_CHANGED="false"
+          if echo "$CHANGED_FILES" | grep -q "^cmd/"; then
+            GO_CHANGED="true"
+            GUI_REASONS="${GUI_REASONS}- Go source code changed (\`cmd/\` — analyze/status binaries)\n"
+          fi
+
+          # Build the report body
+          {
+            echo "body<<REPORT_EOF"
+
+            echo "## Upstream Sync Report"
+            echo ""
+            echo "**Latest upstream tag:** \`${LATEST_TAG}\`"
+            echo "**Commits synced:** ${COMMIT_COUNT}"
+            echo ""
+
+            # GUI impact assessment
+            if [ "$GUI_UPDATE_NEEDED" = "true" ]; then
+              echo "### :warning: GUI Update Likely Needed"
+              echo ""
+              echo "The following changes may require updates to the moleapp GUI:"
+              echo ""
+              echo -e "$GUI_REASONS"
+              echo "**Action:** Review the changes below and update \`src-tauri/src/lib.rs\` if command output formats or behavior changed."
+            else
+              echo "### :white_check_mark: GUI Update Probably Not Needed"
+              echo ""
+              echo "Changes appear to be in areas not directly used by the moleapp GUI."
+              echo "You can likely release as-is after a quick smoke test."
+            fi
+
+            echo ""
+            echo "### Commits"
+            echo ""
+            echo '```'
+            echo "$COMMIT_LOG"
+            echo '```'
+
+            echo ""
+            echo "### Changed Files"
+            echo ""
+            echo '```'
+            echo "$CHANGED_FILES"
+            echo '```'
+
+            if [ -n "$NEW_COMMANDS" ]; then
+              echo ""
+              echo "### :sparkles: Possible New Commands Detected"
+              echo ""
+              echo '```'
+              echo "$NEW_COMMANDS"
+              echo '```'
+              echo ""
+              echo "Consider adding GUI pages for these if they are user-facing features."
+            fi
+
+            echo ""
+            echo "---"
+            echo ""
+            echo "**To release:** Review changes, update moleapp if needed, then trigger the [Release workflow](https://github.com/drlegall1987/moleapp/actions/workflows/release.yml) manually."
+
+            echo "REPORT_EOF"
+          } >> $GITHUB_OUTPUT
+
+          echo "gui_update_needed=$GUI_UPDATE_NEEDED" >> $GITHUB_OUTPUT
+          echo "latest_tag=$LATEST_TAG" >> $GITHUB_OUTPUT
 
       - name: Merge upstream changes
         if: steps.check.outputs.already_synced == 'false'
@@ -46,10 +177,28 @@ jobs:
           git merge upstream/main --ff-only
           git push origin main
 
-      - name: Get latest upstream tag
+      - name: Create issue on moleapp
         if: steps.check.outputs.already_synced == 'false'
-        id: tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          LATEST_TAG=$(git describe --tags --abbrev=0 upstream/main 2>/dev/null || echo "none")
-          echo "latest_tag=$LATEST_TAG" >> $GITHUB_OUTPUT
-          echo "Latest upstream tag: $LATEST_TAG"
+          TAG="${{ steps.report.outputs.latest_tag }}"
+          GUI_NEEDED="${{ steps.report.outputs.gui_update_needed }}"
+
+          if [ "$GUI_NEEDED" = "true" ]; then
+            TITLE="Upstream sync ${TAG}: review needed — GUI may need updates"
+            LABELS="upstream-sync,gui-review"
+          else
+            TITLE="Upstream sync ${TAG}: ready to release"
+            LABELS="upstream-sync"
+          fi
+
+          gh issue create \
+            --repo drlegall1987/moleapp \
+            --title "$TITLE" \
+            --body "${{ steps.report.outputs.body }}" \
+            --label "$LABELS" 2>/dev/null || \
+          gh issue create \
+            --repo drlegall1987/moleapp \
+            --title "$TITLE" \
+            --body "${{ steps.report.outputs.body }}"
