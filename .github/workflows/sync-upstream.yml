@@ -1,0 +1,55 @@
+name: Sync with upstream
+
+on:
+  schedule:
+    # Run daily at 6:17 AM UTC
+    - cron: '17 6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    name: Sync fork with tw93/Mole
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout fork
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Add upstream remote
+        run: |
+          git remote add upstream https://github.com/tw93/Mole.git || true
+          git fetch upstream
+
+      - name: Check for new commits
+        id: check
+        run: |
+          LOCAL=$(git rev-parse HEAD)
+          UPSTREAM=$(git rev-parse upstream/main)
+          if [ "$LOCAL" = "$UPSTREAM" ]; then
+            echo "already_synced=true" >> $GITHUB_OUTPUT
+            echo "Fork is already up to date"
+          else
+            echo "already_synced=false" >> $GITHUB_OUTPUT
+            echo "New upstream commits detected"
+          fi
+
+      - name: Merge upstream changes
+        if: steps.check.outputs.already_synced == 'false'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git merge upstream/main --ff-only
+          git push origin main
+
+      - name: Get latest upstream tag
+        if: steps.check.outputs.already_synced == 'false'
+        id: tag
+        run: |
+          LATEST_TAG=$(git describe --tags --abbrev=0 upstream/main 2>/dev/null || echo "none")
+          echo "latest_tag=$LATEST_TAG" >> $GITHUB_OUTPUT
+          echo "Latest upstream tag: $LATEST_TAG"
