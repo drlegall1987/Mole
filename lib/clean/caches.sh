@@ -49,11 +49,17 @@ clean_service_worker_cache() {
     [[ ! -d "$cache_path" ]] && return 0
     local cleaned_size=0
     local protected_count=0
+    # shellcheck disable=SC2016
     while IFS= read -r cache_dir; do
         [[ ! -d "$cache_dir" ]] && continue
         # Extract a best-effort domain name from cache folder.
         local domain=$(basename "$cache_dir" | grep -oE '[a-zA-Z0-9][-a-zA-Z0-9]*\.[a-zA-Z]{2,}' | head -1 || echo "")
-        local size=$(run_with_timeout 5 get_path_size_kb "$cache_dir")
+        local size=0
+        local _du_out
+        if _du_out=$(run_with_timeout 5 du -skP "$cache_dir" 2> /dev/null); then
+            local _sz="${_du_out%%[^0-9]*}"
+            [[ "$_sz" =~ ^[0-9]+$ ]] && size="$_sz"
+        fi
         local is_protected=false
         for protected_domain in "${PROTECTED_SW_DOMAINS[@]}"; do
             if [[ "$domain" == *"$protected_domain"* ]]; then
@@ -68,7 +74,7 @@ clean_service_worker_cache() {
             fi
             cleaned_size=$((cleaned_size + size))
         fi
-    done < <(run_with_timeout 10 sh -c "find '$cache_path' -type d -depth 2 2> /dev/null || true")
+    done < <(run_with_timeout 10 sh -c 'find "$1" -type d -depth 2 2>/dev/null || true' _ "$cache_path")
     if [[ $cleaned_size -gt 0 ]]; then
         local spinner_was_running=false
         if [[ -t 1 && -n "${INLINE_SPINNER_PID:-}" ]]; then
@@ -287,7 +293,7 @@ process_project_cache_matches() {
     local cache_dir=""
     while IFS=$'\t' read -r record_root cache_dir; do
         [[ -n "$record_root" && -n "$cache_dir" ]] || continue
-        case "$(basename "$cache_dir")" in
+        case "${cache_dir##*/}" in
             ".next")
                 flush_python_group_if_needed "$current_python_root" current_python_dirs
                 current_python_root=""
@@ -327,7 +333,8 @@ clean_python_bytecode_cache_group() {
     local -a cache_dirs=("$@")
     [[ ${#cache_dirs[@]} -eq 0 ]] && return 0
 
-    local display_root="${project_root/#$HOME/~}"
+    local display_root
+    display_root=$(basename "$project_root")
     local total_size_kb=0
     local removed_count=0
     local skipped_count=0

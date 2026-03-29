@@ -441,6 +441,11 @@ clean_brave_old_versions() {
         current_version="${current_version##*/}"
         [[ -n "$current_version" ]] || continue
 
+        if [[ ! -d "$versions_dir/$current_version" ]]; then
+            echo -e "  ${GRAY}${ICON_WARNING}${NC} Brave Browser Current symlink is broken · skipping version cleanup"
+            continue
+        fi
+
         local -a old_versions=()
         local dir name
         for dir in "$versions_dir"/*; do
@@ -576,13 +581,9 @@ clean_support_app_data() {
     fi
 
     # Do not touch Messages attachments, only preview/sticker caches.
-    if pgrep -x "Messages" > /dev/null 2>&1; then
-        echo -e "  ${GRAY}${ICON_WARNING}${NC} Messages is running · preview cache cleanup skipped"
-    else
-        safe_clean ~/Library/Messages/StickerCache/* "Messages sticker cache"
-        safe_clean ~/Library/Messages/Caches/Previews/Attachments/* "Messages preview attachment cache"
-        safe_clean ~/Library/Messages/Caches/Previews/StickerCache/* "Messages preview sticker cache"
-    fi
+    safe_clean ~/Library/Messages/StickerCache/* "Messages sticker cache"
+    safe_clean ~/Library/Messages/Caches/Previews/Attachments/* "Messages preview attachment cache"
+    safe_clean ~/Library/Messages/Caches/Previews/StickerCache/* "Messages preview sticker cache"
 }
 
 # App caches (merged: macOS system caches + Sandboxed apps).
@@ -660,15 +661,15 @@ clean_app_caches() {
     stop_section_spinner
 
     # Sandboxed app caches
-    # Skip wallpaper agent cache if the agent is running — clearing it resets the wallpaper.
-    if ! pgrep -x "WallpaperAgent" > /dev/null 2>&1; then
-        safe_clean ~/Library/Containers/com.apple.wallpaper.agent/Data/Library/Caches/* "Wallpaper agent cache"
-    else
-        echo -e "  ${GRAY}${ICON_WARNING}${NC} Wallpaper agent is running · cache cleanup skipped"
-    fi
+    safe_clean ~/Library/Containers/com.apple.wallpaper.agent/Data/Library/Caches/* "Wallpaper agent cache"
     safe_clean ~/Library/Containers/com.apple.mediaanalysisd/Data/Library/Caches/* "Media analysis cache"
+    safe_clean ~/Library/Containers/com.apple.mediaanalysisd/Data/tmp/* "Media analysis temp files"
     safe_clean ~/Library/Containers/com.apple.AppStore/Data/Library/Caches/* "App Store cache"
     safe_clean ~/Library/Containers/com.apple.configurator.xpc.InternetService/Data/tmp/* "Apple Configurator temp files"
+    safe_clean ~/Library/Containers/com.apple.wallpaper.extension.aerials/Data/tmp/* "Wallpaper aerials temp files"
+    safe_clean ~/Library/Containers/com.apple.geod/Data/tmp/* "Geod temp files"
+    safe_clean ~/Library/Containers/com.apple.stocks/Data/Library/Caches/* "Stocks cache"
+    safe_clean ~/Library/Application\ Support/com.apple.wallpaper/aerials/thumbnails/* "Wallpaper aerials thumbnails"
     local containers_dir="$HOME/Library/Containers"
     [[ ! -d "$containers_dir" ]] && return 0
     start_section_spinner "Scanning sandboxed apps..."
@@ -1092,6 +1093,11 @@ clean_browsers() {
     safe_clean ~/Library/Application\ Support/Google/Chrome/*/Application\ Cache/* "Chrome app cache"
     safe_clean ~/Library/Application\ Support/Google/Chrome/*/GPUCache/* "Chrome GPU cache"
     safe_clean ~/Library/Application\ Support/Google/Chrome/component_crx_cache/* "Chrome component CRX cache"
+    local _chrome_profile
+    for _chrome_profile in "$HOME/Library/Application Support/Google/Chrome"/*/; do
+        clean_service_worker_cache "Chrome" "$_chrome_profile/Service Worker/CacheStorage"
+        safe_clean "$_chrome_profile"/Service\ Worker/ScriptCache/* "Chrome Service Worker ScriptCache"
+    done
     safe_clean ~/Library/Application\ Support/Google/GoogleUpdater/crx_cache/* "GoogleUpdater CRX cache"
     safe_clean ~/Library/Application\ Support/Google/GoogleUpdater/*.old "GoogleUpdater old files"
     safe_clean ~/Library/Caches/Chromium/* "Chromium cache"
@@ -1160,7 +1166,13 @@ clean_cloud_storage() {
 # Office app caches.
 clean_office_applications() {
     safe_clean ~/Library/Caches/com.microsoft.Word "Microsoft Word cache"
+    safe_clean ~/Library/Containers/com.microsoft.Word/Data/Library/Caches/* "Microsoft Word container cache"
+    safe_clean ~/Library/Containers/com.microsoft.Word/Data/tmp/* "Microsoft Word temp files"
+    safe_clean ~/Library/Containers/com.microsoft.Word/Data/Library/Logs/* "Microsoft Word container logs"
     safe_clean ~/Library/Caches/com.microsoft.Excel "Microsoft Excel cache"
+    safe_clean ~/Library/Containers/com.microsoft.Excel/Data/Library/Caches/* "Microsoft Excel container cache"
+    safe_clean ~/Library/Containers/com.microsoft.Excel/Data/tmp/* "Microsoft Excel temp files"
+    safe_clean ~/Library/Containers/com.microsoft.Excel/Data/Library/Logs/* "Microsoft Excel container logs"
     safe_clean ~/Library/Caches/com.microsoft.Powerpoint "Microsoft PowerPoint cache"
     safe_clean ~/Library/Caches/com.microsoft.Outlook/* "Microsoft Outlook cache"
     safe_clean ~/Library/Caches/com.apple.iWork.* "Apple iWork cache"

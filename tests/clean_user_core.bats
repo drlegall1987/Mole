@@ -183,7 +183,7 @@ EOF
     [[ "$output" != *"Messages attachments"* ]]
 }
 
-@test "clean_support_app_data skips messages preview caches while Messages is running" {
+@test "clean_support_app_data always cleans messages preview caches" {
     local support_home="$HOME/support-cache-home-2"
     run env HOME="$support_home" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
 set -euo pipefail
@@ -198,10 +198,9 @@ clean_support_app_data
 EOF
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Messages is running"* ]]
-    [[ "$output" != *"Messages sticker cache"* ]]
-    [[ "$output" != *"Messages preview attachment cache"* ]]
-    [[ "$output" != *"Messages preview sticker cache"* ]]
+    [[ "$output" == *"Messages sticker cache"* ]]
+    [[ "$output" == *"Messages preview attachment cache"* ]]
+    [[ "$output" == *"Messages preview sticker cache"* ]]
 }
 
 @test "clean_app_caches skips protected containers" {
@@ -581,6 +580,7 @@ set -euo pipefail
 source "$PROJECT_ROOT/lib/core/common.sh"
 source "$PROJECT_ROOT/lib/clean/user.sh"
 safe_clean() { echo "$2"; }
+clean_service_worker_cache() { :; }
 note_activity() { :; }
 files_cleaned=0
 total_size_cleaned=0
