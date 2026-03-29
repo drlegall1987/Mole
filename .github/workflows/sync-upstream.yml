@@ -30,13 +30,13 @@ jobs:
         run: |
           LOCAL=$(git rev-parse HEAD)
           UPSTREAM=$(git rev-parse upstream/main)
-          if [ "$LOCAL" = "$UPSTREAM" ]; then
-            echo "Fork is already up to date"
+          if git merge-base --is-ancestor $UPSTREAM $LOCAL; then
+            echo "Fork is already up to date (upstream is behind or equal)"
           else
             echo "New upstream commits detected, merging..."
             git config user.name "github-actions[bot]"
             git config user.email "github-actions[bot]@users.noreply.github.com"
-            git merge upstream/main --ff-only
+            git merge upstream/main --no-edit -m "chore: sync with upstream tw93/Mole"
             git push origin main
             echo "Fork synced successfully"
           fi
