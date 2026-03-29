@@ -25,17 +25,21 @@ jobs:
           git remote add upstream https://github.com/tw93/Mole.git || true
           git fetch upstream --tags
 
-      - name: Check for new commits
-        id: check
+      - name: Sync upstream changes
         run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
           LOCAL=$(git rev-parse HEAD)
           UPSTREAM=$(git rev-parse upstream/main)
-          if git merge-base --is-ancestor $UPSTREAM $LOCAL; then
-            echo "Fork is already up to date (upstream is behind or equal)"
+
+          # Check if upstream is already an ancestor of our fork (already synced)
+          IS_ANCESTOR=$(git merge-base --is-ancestor "$UPSTREAM" "$LOCAL" && echo "yes" || echo "no")
+
+          if [ "$IS_ANCESTOR" = "yes" ]; then
+            echo "Fork is already up to date"
           else
             echo "New upstream commits detected, merging..."
-            git config user.name "github-actions[bot]"
-            git config user.email "github-actions[bot]@users.noreply.github.com"
             git merge upstream/main --no-edit -m "chore: sync with upstream tw93/Mole"
             git push origin main
             echo "Fork synced successfully"
