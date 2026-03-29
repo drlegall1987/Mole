@@ -40,7 +40,9 @@ jobs:
             echo "Fork is already up to date"
           else
             echo "New upstream commits detected, merging..."
-            git merge upstream/main --no-edit -m "chore: sync with upstream tw93/Mole"
+            # Use -X theirs to resolve conflicts in favour of upstream
+            # (CONTRIBUTORS.svg is auto-generated and causes conflicts)
+            git merge upstream/main --no-edit -X theirs -m "chore: sync with upstream tw93/Mole"
             git push origin main
             echo "Fork synced successfully"
           fi
