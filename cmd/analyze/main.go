@@ -246,6 +246,9 @@ func createOverviewEntries() []dirEntry {
 		dirEntry{Name: "System Library", Path: "/Library", IsDir: true, Size: -1},
 	)
 
+	// Hidden space insights — paths that silently accumulate disk usage.
+	entries = append(entries, createInsightEntries()...)
+
 	return entries
 }
 
@@ -637,7 +640,11 @@ func (m model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				}
 			}
 		} else if len(m.entries) > 0 && m.selected > 0 {
-			m.selected--
+			next := m.selected - 1
+			for next > 0 && m.entries[next].Size == 0 {
+				next--
+			}
+			m.selected = next
 			if m.selected < m.offset {
 				m.offset = m.selected
 			}
@@ -652,7 +659,11 @@ func (m model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				}
 			}
 		} else if len(m.entries) > 0 && m.selected < len(m.entries)-1 {
-			m.selected++
+			next := m.selected + 1
+			for next < len(m.entries)-1 && m.entries[next].Size == 0 {
+				next++
+			}
+			m.selected = next
 			viewport := calculateViewport(m.height, false)
 			if m.selected >= m.offset+viewport {
 				m.offset = m.selected - viewport + 1
@@ -1154,7 +1165,7 @@ func (m *model) removePathFromView(path string) {
 
 func scanOverviewPathCmd(path string, index int) tea.Cmd {
 	return func() tea.Msg {
-		size, err := measureOverviewSize(path)
+		size, err := measureInsightSize(path)
 		return overviewSizeMsg{
 			Path:  path,
 			Index: index,
