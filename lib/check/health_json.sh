@@ -131,6 +131,7 @@ EOF
     items+=('network_optimization|Network Cache Refresh|Optimize DNS cache & restart mDNSResponder|true')
 
     # Advanced optimizations (high value, auto-run with safety checks)
+    items+=('quarantine_cleanup|Quarantine Database Cleanup|Clear Gatekeeper download tracking history|true')
     items+=('sqlite_vacuum|Database Optimization|Compress SQLite databases for Mail, Safari & Messages (skips if apps are running)|true')
     items+=('launch_services_rebuild|LaunchServices Repair|Repair "Open with" menu & file associations|true')
     items+=('font_cache_rebuild|Font Cache Rebuild|Rebuild font database to fix rendering issues (skips if browsers are running)|true')
@@ -142,6 +143,8 @@ EOF
     items+=('disk_permissions_repair|Permission Repair|Fix user directory permission issues|true')
     items+=('bluetooth_reset|Bluetooth Refresh|Restart Bluetooth module to fix connectivity (skips if in use)|true')
     items+=('spotlight_index_optimize|Spotlight Optimization|Rebuild index if search is slow (smart detection)|true')
+    items+=('launch_agents_cleanup|Launch Agents Cleanup|Remove broken LaunchAgents whose binaries no longer exist|true')
+    items+=('periodic_maintenance|Periodic Maintenance|Run macOS daily/weekly/monthly maintenance scripts if stale|true')
 
     # Removed high-risk optimizations:
     # - startup_items_cleanup: Risk of deleting legitimate app helpers

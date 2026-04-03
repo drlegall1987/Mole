@@ -116,6 +116,65 @@ EOF
     [[ "$output" == *"mDNSResponder restarted"* ]]
 }
 
+@test "opt_quarantine_cleanup reports clean when no database" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_DRY_RUN=1 bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/optimize/tasks.sh"
+opt_quarantine_cleanup
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"already clean"* ]]
+}
+
+@test "opt_quarantine_cleanup reports entries in dry-run" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_DRY_RUN=1 bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/optimize/tasks.sh"
+# Stub whitelist check to always allow.
+should_protect_path() { return 1; }
+# Create a mock quarantine database with entries.
+mkdir -p "$HOME/Library/Preferences"
+local_db="$HOME/Library/Preferences/com.apple.LaunchServices.QuarantineEventsV2"
+sqlite3 "$local_db" "CREATE TABLE IF NOT EXISTS LSQuarantineEvent (id TEXT);"
+sqlite3 "$local_db" "INSERT INTO LSQuarantineEvent VALUES ('test1');"
+sqlite3 "$local_db" "INSERT INTO LSQuarantineEvent VALUES ('test2');"
+opt_quarantine_cleanup
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Quarantine history cleared"* ]]
+    [[ "$output" == *"2 entries"* ]]
+}
+
+@test "opt_quarantine_cleanup skips when sqlite3 unavailable" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/optimize/tasks.sh"
+export PATH="/nonexistent"
+opt_quarantine_cleanup
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"sqlite3 unavailable"* ]]
+}
+
+@test "execute_optimization dispatches quarantine_cleanup" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/optimize/tasks.sh"
+opt_quarantine_cleanup() { echo "quarantine"; }
+execute_optimization quarantine_cleanup
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"quarantine"* ]]
+}
+
 @test "opt_sqlite_vacuum reports sqlite3 unavailable" {
     run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" /bin/bash --noprofile --norc <<'EOF'
 set -euo pipefail
@@ -252,4 +311,143 @@ EOF
     [ "$status" -eq 0 ]
     [[ "$output" == *"lsregister not found"* ]]
     [[ "$output" == *"survived"* ]]
+}
+
+@test "opt_launch_agents_cleanup reports healthy when no directory" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_DRY_RUN=1 bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/optimize/tasks.sh"
+opt_launch_agents_cleanup
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Launch Agents all healthy"* ]]
+}
+
+@test "opt_launch_agents_cleanup detects broken agents" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_DRY_RUN=1 bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/optimize/tasks.sh"
+# Create mock LaunchAgents with a broken binary reference.
+mkdir -p "$HOME/Library/LaunchAgents"
+cat > "$HOME/Library/LaunchAgents/com.test.broken.plist" <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.test.broken</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/nonexistent/binary</string>
+    </array>
+</dict>
+</plist>
+PLIST
+safe_remove() { return 0; }
+opt_launch_agents_cleanup
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Cleaned 1 broken Launch Agent"* ]]
+}
+
+@test "opt_launch_agents_cleanup skips healthy agents" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_DRY_RUN=1 bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/optimize/tasks.sh"
+# Clean up any leftover plists from previous tests.
+rm -f "$HOME/Library/LaunchAgents"/*.plist 2>/dev/null || true
+# Create mock LaunchAgent pointing to an existing binary.
+mkdir -p "$HOME/Library/LaunchAgents"
+cat > "$HOME/Library/LaunchAgents/com.test.healthy.plist" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.test.healthy</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+    </array>
+</dict>
+</plist>
+PLIST
+opt_launch_agents_cleanup
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Launch Agents all healthy"* ]]
+}
+
+@test "execute_optimization dispatches launch_agents_cleanup" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/optimize/tasks.sh"
+opt_launch_agents_cleanup() { echo "launch_agents"; }
+execute_optimization launch_agents_cleanup
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"launch_agents"* ]]
+}
+
+@test "opt_periodic_maintenance reports current when log is fresh" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_DRY_RUN=1 bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/optimize/tasks.sh"
+tmplog="$(mktemp /tmp/mole-test-daily.XXXXXX)"
+touch "$tmplog"
+MOLE_PERIODIC_LOG="$tmplog" opt_periodic_maintenance
+rm -f "$tmplog"
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"already current"* ]]
+}
+
+@test "opt_periodic_maintenance triggers in dry-run when log is stale" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_DRY_RUN=1 bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/optimize/tasks.sh"
+tmplog="$(mktemp /tmp/mole-test-daily.XXXXXX)"
+touch -t "$(date -v-10d +%Y%m%d%H%M.%S)" "$tmplog"
+MOLE_PERIODIC_LOG="$tmplog" opt_periodic_maintenance
+rm -f "$tmplog"
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Periodic maintenance triggered"* ]]
+}
+
+@test "opt_periodic_maintenance triggers in dry-run when log is missing" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_DRY_RUN=1 bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/optimize/tasks.sh"
+MOLE_PERIODIC_LOG="/tmp/mole-test-nonexistent-daily.out" opt_periodic_maintenance
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Periodic maintenance triggered"* ]]
+}
+
+@test "execute_optimization dispatches periodic_maintenance" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+source "$PROJECT_ROOT/lib/optimize/tasks.sh"
+opt_periodic_maintenance() { echo "periodic"; }
+execute_optimization periodic_maintenance
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"periodic"* ]]
 }

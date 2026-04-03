@@ -252,6 +252,59 @@ opt_network_optimization() {
     fi
 }
 
+# Quarantine database cleanup (Gatekeeper download history).
+opt_quarantine_cleanup() {
+    if [[ "${MO_DEBUG:-}" == "1" ]]; then
+        debug_operation_start "Quarantine Database Cleanup" "Clear Gatekeeper download tracking history"
+        debug_operation_detail "Method" "DELETE + VACUUM on QuarantineEventsV2 SQLite database"
+        debug_operation_detail "Safety" "Only clears download tracking metadata, does not affect file quarantine flags"
+        debug_operation_detail "Expected outcome" "Reduced database size, cleared download tracking history"
+        debug_risk_level "LOW" "Database is automatically recreated by macOS"
+    fi
+
+    if ! command -v sqlite3 > /dev/null 2>&1; then
+        echo -e "  ${GRAY}-${NC} Quarantine cleanup skipped, sqlite3 unavailable"
+        return 0
+    fi
+
+    local quarantine_db="$HOME/Library/Preferences/com.apple.LaunchServices.QuarantineEventsV2"
+
+    if [[ ! -f "$quarantine_db" ]]; then
+        opt_msg "Quarantine database already clean"
+        return 0
+    fi
+
+    if should_protect_path "$quarantine_db"; then
+        opt_msg "Quarantine database already clean"
+        return 0
+    fi
+
+    # Check if database has any entries worth cleaning.
+    local row_count
+    row_count=$(run_with_timeout 5 sqlite3 "$quarantine_db" "SELECT COUNT(*) FROM LSQuarantineEvent;" 2> /dev/null || echo "0")
+
+    if [[ ! "$row_count" =~ ^[0-9]+$ ]] || [[ "$row_count" -eq 0 ]]; then
+        opt_msg "Quarantine database already clean"
+        return 0
+    fi
+
+    if [[ "${MOLE_DRY_RUN:-0}" != "1" ]]; then
+        local exit_code=0
+        set +e
+        run_with_timeout 10 sqlite3 "$quarantine_db" "DELETE FROM LSQuarantineEvent; VACUUM;" 2> /dev/null
+        exit_code=$?
+        set -e
+
+        if [[ $exit_code -eq 0 ]]; then
+            opt_msg "Quarantine history cleared ($row_count entries)"
+        else
+            echo -e "  ${YELLOW}${ICON_WARNING}${NC} Failed to clean quarantine database"
+        fi
+    else
+        opt_msg "Quarantine history cleared ($row_count entries)"
+    fi
+}
+
 # SQLite vacuum for Mail/Messages/Safari (safety checks applied).
 opt_sqlite_vacuum() {
     if [[ "${MO_DEBUG:-}" == "1" ]]; then
@@ -805,6 +858,76 @@ opt_dock_refresh() {
     opt_msg "Dock refreshed"
 }
 
+# Broken LaunchAgent cleanup.
+opt_launch_agents_cleanup() {
+    local agents_dir="$HOME/Library/LaunchAgents"
+
+    if [[ ! -d "$agents_dir" ]]; then
+        opt_msg "Launch Agents all healthy"
+        return 0
+    fi
+
+    local broken_count=0
+    local -a broken_plists=()
+
+    for plist in "$agents_dir"/*.plist; do
+        [[ -f "$plist" ]] || continue
+
+        local binary=""
+        binary=$(/usr/libexec/PlistBuddy -c "Print :ProgramArguments:0" "$plist" 2> /dev/null || true)
+        if [[ -z "$binary" ]]; then
+            binary=$(/usr/libexec/PlistBuddy -c "Print :Program" "$plist" 2> /dev/null || true)
+        fi
+
+        if [[ -n "$binary" && ! -e "$binary" ]]; then
+            broken_count=$((broken_count + 1))
+            broken_plists+=("$plist")
+        fi
+    done
+
+    if [[ $broken_count -eq 0 ]]; then
+        opt_msg "Launch Agents all healthy"
+        return 0
+    fi
+
+    for plist in "${broken_plists[@]}"; do
+        run_launchctl_unload "$plist"
+        safe_remove "$plist" true > /dev/null 2>&1 || true
+    done
+
+    opt_msg "Cleaned $broken_count broken Launch Agent(s)"
+}
+
+# macOS periodic maintenance scripts (daily/weekly/monthly).
+# Log path is configurable via MOLE_PERIODIC_LOG for testing; defaults to /var/log/daily.out.
+# A missing log file is treated as stale and triggers maintenance.
+opt_periodic_maintenance() {
+    local daily_log="${MOLE_PERIODIC_LOG:-/var/log/daily.out}"
+    local stale_days=7
+
+    if [[ -f "$daily_log" ]]; then
+        local last_mod now age_days
+        last_mod=$(stat -f %m "$daily_log" 2> /dev/null || echo "0")
+        now=$(get_epoch_seconds)
+        age_days=$(((now - last_mod) / 86400))
+
+        if [[ $age_days -lt $stale_days ]]; then
+            opt_msg "Periodic maintenance already current (${age_days}d ago)"
+            return 0
+        fi
+    fi
+
+    if [[ "${MOLE_DRY_RUN:-0}" != "1" ]]; then
+        if sudo periodic daily weekly monthly 2> /dev/null; then
+            opt_msg "Periodic maintenance triggered"
+        else
+            echo -e "  ${YELLOW}${ICON_WARNING}${NC} Failed to run periodic maintenance"
+        fi
+    else
+        opt_msg "Periodic maintenance triggered"
+    fi
+}
+
 # Dispatch optimization by action name.
 execute_optimization() {
     local action="$1"
@@ -816,6 +939,7 @@ execute_optimization() {
         saved_state_cleanup) opt_saved_state_cleanup ;;
         fix_broken_configs) opt_fix_broken_configs ;;
         network_optimization) opt_network_optimization ;;
+        quarantine_cleanup) opt_quarantine_cleanup ;;
         sqlite_vacuum) opt_sqlite_vacuum ;;
         launch_services_rebuild) opt_launch_services_rebuild ;;
         font_cache_rebuild) opt_font_cache_rebuild ;;
@@ -825,6 +949,8 @@ execute_optimization() {
         disk_permissions_repair) opt_disk_permissions_repair ;;
         bluetooth_reset) opt_bluetooth_reset ;;
         spotlight_index_optimize) opt_spotlight_index_optimize ;;
+        launch_agents_cleanup) opt_launch_agents_cleanup ;;
+        periodic_maintenance) opt_periodic_maintenance ;;
         *)
             echo -e "${YELLOW}${ICON_ERROR}${NC} Unknown action: $action"
             return 1
