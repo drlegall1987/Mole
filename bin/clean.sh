@@ -1055,8 +1055,8 @@ perform_cleanup() {
         clean_application_support_logs
         end_section
 
-        # ===== 10. Orphaned data =====
-        start_section "Orphaned data"
+        # ===== 10. App leftovers =====
+        start_section "App leftovers"
         clean_orphaned_app_data
         clean_orphaned_system_services
         show_user_launch_agent_hint_notice
@@ -1065,8 +1065,9 @@ perform_cleanup() {
         # ===== 11. Apple Silicon =====
         clean_apple_silicon_caches
 
-        # ===== 12. Device backups =====
-        start_section "Device backups"
+        # ===== 12. Device backups & firmware =====
+        start_section "Device backups & firmware"
+        clean_cached_device_firmware
         check_ios_device_backups
         end_section
 
