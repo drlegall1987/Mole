@@ -39,7 +39,8 @@ check_touchid_sudo() {
     if command -v is_whitelisted > /dev/null && is_whitelisted "check_touchid"; then return; fi
     # Check if Touch ID is configured for sudo
     local pam_file="/etc/pam.d/sudo"
-    if [[ -f "$pam_file" ]] && grep -q "pam_tid.so" "$pam_file" 2> /dev/null; then
+    local pam_local="/etc/pam.d/sudo_local"
+    if grep -q "pam_tid.so" "$pam_file" "$pam_local" 2> /dev/null; then
         echo -e "  ${GREEN}✓${NC} Touch ID     Biometric authentication enabled"
     else
         # Check if Touch ID is supported
@@ -141,8 +142,8 @@ check_firewall() {
         return
     fi
 
-    # Fall back to macOS built-in firewall check
-    local firewall_output=$(sudo /usr/libexec/ApplicationFirewall/socketfilterfw --getglobalstate 2> /dev/null || echo "")
+    # Fall back to macOS built-in firewall check (no sudo needed for read-only query)
+    local firewall_output=$(/usr/libexec/ApplicationFirewall/socketfilterfw --getglobalstate 2> /dev/null || echo "")
     if [[ "$firewall_output" == *"State = 1"* ]] || [[ "$firewall_output" == *"State = 2"* ]]; then
         echo -e "  ${GREEN}✓${NC} Firewall     Network protection enabled"
     else
@@ -829,6 +830,37 @@ check_orphan_launch_agents() {
 check_brew_health() {
     # Check whitelist
     if command -v is_whitelisted > /dev/null && is_whitelisted "check_brew_health"; then return; fi
+
+    if ! command -v brew > /dev/null 2>&1; then
+        return
+    fi
+
+    # Detect taps with no installed formulae or casks.
+    local -a stale_taps=()
+    local installed
+    installed=$(run_with_timeout 5 brew list --full-name 2> /dev/null || true)
+    local tap
+    while IFS= read -r tap; do
+        [[ -z "$tap" ]] && continue
+        # Skip the core taps — they are always needed.
+        [[ "$tap" == "homebrew/core" || "$tap" == "homebrew/cask" ]] && continue
+        if ! printf '%s\n' "$installed" | grep -q "^${tap}/"; then
+            stale_taps+=("$tap")
+        fi
+    done < <(run_with_timeout 5 brew tap 2> /dev/null)
+
+    local n=${#stale_taps[@]}
+    if [[ $n -eq 0 ]]; then
+        echo -e "  ${GREEN}✓${NC} Brew Taps    All taps in use"
+    else
+        local s=""
+        ((n > 1)) && s="s"
+        echo -e "  ${GRAY}${ICON_WARNING}${NC} Brew Taps    ${YELLOW}${n} unused tap${s}${NC}"
+        local preview="${stale_taps[0]}"
+        ((n > 1)) && preview="${preview}, ${stale_taps[1]}"
+        ((n > 2)) && preview="${preview} +$((n - 2))"
+        echo -e "    ${GRAY}${preview}${NC}"
+    fi
 }
 
 check_system_health() {
@@ -839,6 +871,7 @@ check_system_health() {
     check_login_items
     check_disk_smart
     check_orphan_launch_agents
+    check_brew_health
     check_cache_size
     # Time Machine check is optional; skip by default to avoid noise on systems without backups
 }
