@@ -56,6 +56,11 @@ readonly SYSTEM_CRITICAL_BUNDLES_FAST=(
     "GlobalPreferences"
     ".GlobalPreferences"
     "org.pqrs.Karabiner*"
+    # CUPS printing subsystem ships with macOS; there is no parent .app to
+    # anchor it, so org.cups.* prefs always look "orphaned" to bundle-ID
+    # matching. Deleting them wipes the default printer and recent-printer
+    # list, which users see as lost saved printers. See #731.
+    "org.cups.*"
 )
 
 # Detailed list for uninstall protection
@@ -665,6 +670,12 @@ should_protect_data() {
         com.apple.* | loginwindow | dock | systempreferences | finder | safari)
             return 0
             ;;
+        # CUPS is an OS-provided subsystem with no user-facing app; without this
+        # guard `~/Library/Preferences/org.cups.PrintingPrefs.plist` (which holds
+        # the default printer and recent printers) looks orphaned. See #731.
+        org.cups.*)
+            return 0
+            ;;
         backgroundtaskmanagement* | keychain* | security* | bluetooth* | wifi* | network* | tcc)
             return 0
             ;;
@@ -866,8 +877,20 @@ is_path_whitelisted() {
     local target_path="$1"
     [[ -z "$target_path" ]] && return 1
 
-    # Normalize path (remove trailing slash)
+    # Normalize path (remove trailing slash, collapse consecutive slashes).
+    # Callers sometimes concat a glob expansion that already ends in `/`
+    # with a sub-path that begins with `/`, producing `.../Default//Service
+    # Worker/...`. Without collapsing, those never match a whitelist entry
+    # written with single separators. See #724.
+    #
+    # Note: on bash 3.2 (macOS default), `${var//\/\//\/}` leaves a literal
+    # backslash in the replacement. Indirect variables sidestep that.
+    local _slash_single="/"
+    local _slash_double="//"
     local normalized_target="${target_path%/}"
+    while [[ "$normalized_target" == *"$_slash_double"* ]]; do
+        normalized_target="${normalized_target//$_slash_double/$_slash_single}"
+    done
 
     # Empty whitelist means nothing is protected
     [[ ${#WHITELIST_PATTERNS[@]} -eq 0 ]] && return 1
@@ -875,6 +898,9 @@ is_path_whitelisted() {
     for pattern in "${WHITELIST_PATTERNS[@]}"; do
         # Pattern is already expanded/normalized in bin/clean.sh
         local check_pattern="${pattern%/}"
+        while [[ "$check_pattern" == *"$_slash_double"* ]]; do
+            check_pattern="${check_pattern//$_slash_double/$_slash_single}"
+        done
         local has_glob="false"
         case "$check_pattern" in
             *\** | *\?* | *\[*)

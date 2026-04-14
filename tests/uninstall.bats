@@ -307,6 +307,91 @@ EOF
 	[[ "$output" != *"more files"* ]]
 }
 
+@test "uninstall_persist_cache_file heals non-writable destination" {
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+
+# Source only the helper by evaluating its function definition.
+eval "$(sed -n '/^uninstall_persist_cache_file()/,/^}$/p' "$PROJECT_ROOT/bin/uninstall.sh")"
+
+src="$HOME/cache.src"
+dst="$HOME/cache.dst"
+printf 'fresh-data\n' > "$src"
+printf 'stale-data\n' > "$dst"
+chmod 0444 "$dst"
+[[ ! -w "$dst" ]] || { echo "precondition: dst should be read-only" >&2; exit 1; }
+
+uninstall_persist_cache_file "$src" "$dst"
+
+[[ ! -e "$src" ]] || { echo "src should be gone" >&2; exit 1; }
+[[ -f "$dst" ]] || { echo "dst missing" >&2; exit 1; }
+grep -q 'fresh-data' "$dst" || { echo "dst not updated"; exit 1; }
+EOF
+
+	[ "$status" -eq 0 ]
+}
+
+@test "uninstall_persist_cache_file does not hang when mv would prompt (stdin closed)" {
+	# Regression for #722: BSD mv without -f prompts on non-writable dst and
+	# blocks reading stdin. The helper must close stdin and use -f.
+	#
+	# The hang detector uses a marker file rather than a PID-based watchdog:
+	# PIDs get recycled quickly on CI and a stale `kill -9 $pid` can succeed
+	# against an unrelated process, producing a false HANG. The marker
+	# approach only cares about whether the helper itself completed.
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+eval "$(sed -n '/^uninstall_persist_cache_file()/,/^}$/p' "$PROJECT_ROOT/bin/uninstall.sh")"
+
+src="$HOME/snap.src"
+dst="$HOME/snap.dst"
+done_marker="$HOME/snap.done"
+printf 'x\n' > "$src"
+printf 'y\n' > "$dst"
+chmod 0444 "$dst"
+
+(
+    printf 'n\nn\nn\n' | uninstall_persist_cache_file "$src" "$dst"
+    : > "$done_marker"
+) &
+bgpid=$!
+
+# Poll for completion marker for up to ~5s.
+for _ in $(seq 1 50); do
+    [[ -e "$done_marker" ]] && break
+    sleep 0.1
+done
+
+if [[ ! -e "$done_marker" ]]; then
+    kill -9 "$bgpid" 2>/dev/null || true
+    echo HANG
+fi
+wait "$bgpid" 2>/dev/null || true
+EOF
+
+	[ "$status" -eq 0 ]
+	[[ "$output" != *"HANG"* ]]
+}
+
+@test "uninstall_persist_cache_file is a no-op when source is empty" {
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+eval "$(sed -n '/^uninstall_persist_cache_file()/,/^}$/p' "$PROJECT_ROOT/bin/uninstall.sh")"
+
+src="$HOME/empty.src"
+dst="$HOME/keep.dst"
+: > "$src"
+printf 'untouched\n' > "$dst"
+
+uninstall_persist_cache_file "$src" "$dst"
+
+[[ ! -e "$src" ]] || exit 1
+grep -q 'untouched' "$dst" || exit 1
+EOF
+
+	[ "$status" -eq 0 ]
+}
+
 @test "safe_remove can remove a simple directory" {
 	mkdir -p "$HOME/test_dir"
 	touch "$HOME/test_dir/file.txt"
@@ -704,4 +789,112 @@ EOF
 
 	[ "$status" -eq 0 ]
 	[[ "$output" == *"count=1"* ]]
+}
+
+@test "main clears pending input before app selection after scan (#726)" {
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'INNER'
+set -euo pipefail
+
+trace_file="$HOME/uninstall-trace.log"
+app_cache_file="$HOME/apps-cache.txt"
+touch "$app_cache_file"
+
+log_operation_session_start() { :; }
+show_uninstall_help() { :; }
+hide_cursor() { :; }
+show_cursor() { :; }
+clear_screen() { :; }
+scan_applications() { printf '%s\n' "$app_cache_file"; }
+load_applications() {
+    printf 'load\n' >> "$trace_file"
+    return 0
+}
+drain_pending_input() {
+    printf 'drain\n' >> "$trace_file"
+}
+select_apps_for_uninstall() {
+    printf 'select\n' >> "$trace_file"
+    return 1
+}
+
+eval "$(sed -n '/^main()/,/^main "\$@"/p' "$PROJECT_ROOT/bin/uninstall.sh" | sed '$d')"
+
+main
+
+expected=$(printf 'load\ndrain\nselect\n')
+actual=$(cat "$trace_file")
+[[ "$actual" == "$expected" ]] || {
+    printf 'unexpected trace:\n%s\n' "$actual" >&2
+    exit 1
+}
+INNER
+
+	[ "$status" -eq 0 ]
+}
+
+
+# ---------------------------------------------------------------------------
+# #723: Trash routing default and --permanent flag
+# ---------------------------------------------------------------------------
+
+@test "uninstall main sets MOLE_DELETE_MODE=trash by default" {
+	local apps_cache
+	apps_cache="$(mktemp "${BATS_TEST_TMPDIR:-$BATS_RUN_TMPDIR:-$HOME}/tmp-723-trash.XXXXXX")"
+
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_NO_AUTH=1 \
+		APPS_CACHE_FILE="$apps_cache" bash --noprofile --norc <<'INNER'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+
+log_operation_session_start() { :; }
+show_uninstall_help() { :; }
+hide_cursor() { :; }
+show_cursor() { :; }
+clear_screen() { :; }
+scan_applications() { printf '%s\n' "$APPS_CACHE_FILE"; }
+load_applications() { return 0; }
+drain_pending_input() { :; }
+select_apps_for_uninstall() {
+    printf 'delete_mode=%s\n' "${MOLE_DELETE_MODE:-unset}"
+    return 1
+}
+
+eval "$(sed -n '/^main()/,/^main "\$@"/p' "$PROJECT_ROOT/bin/uninstall.sh" | sed '$d')"
+main
+INNER
+
+	rm -f "$apps_cache"
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"delete_mode=trash"* ]]
+}
+
+@test "uninstall main sets MOLE_DELETE_MODE=permanent with --permanent flag" {
+	local apps_cache
+	apps_cache="$(mktemp "${BATS_TEST_TMPDIR:-$BATS_RUN_TMPDIR:-$HOME}/tmp-723-perm.XXXXXX")"
+
+	run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" MOLE_TEST_NO_AUTH=1 \
+		APPS_CACHE_FILE="$apps_cache" bash --noprofile --norc <<'INNER'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/core/common.sh"
+
+log_operation_session_start() { :; }
+show_uninstall_help() { :; }
+hide_cursor() { :; }
+show_cursor() { :; }
+clear_screen() { :; }
+scan_applications() { printf '%s\n' "$APPS_CACHE_FILE"; }
+load_applications() { return 0; }
+drain_pending_input() { :; }
+select_apps_for_uninstall() {
+    printf 'delete_mode=%s\n' "${MOLE_DELETE_MODE:-unset}"
+    return 1
+}
+
+eval "$(sed -n '/^main()/,/^main "\$@"/p' "$PROJECT_ROOT/bin/uninstall.sh" | sed '$d')"
+main --permanent
+INNER
+
+	rm -f "$apps_cache"
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"delete_mode=permanent"* ]]
 }
