@@ -1258,16 +1258,9 @@ clean_dev_misc() {
     [[ -d "$HOME/.local/share/cursor-agent" ]] && safe_find_delete "$HOME/.local/share/cursor-agent" "*.log" "$MOLE_LOG_AGE_DAYS" "f"
     # Playwright cached browser binaries
     safe_clean ~/Library/Caches/ms-playwright/* "Playwright browsers"
-    # Claude Code CLI session/plugin state
-    safe_clean ~/.claude/plugins/cache/* "Claude Code plugin cache"
-    safe_clean ~/.claude/plugins/marketplaces/* "Claude Code marketplaces cache"
-    safe_clean ~/.claude/paste-cache/* "Claude Code paste cache"
-    safe_clean ~/.claude/tmp/* "Claude Code tmp"
-    # Age-gate history dirs so recent sessions remain available for /resume
-    [[ -d "$HOME/.claude/projects" ]] && safe_find_delete "$HOME/.claude/projects" "*" "$MOLE_LOG_AGE_DAYS" "d"
-    [[ -d "$HOME/.claude/file-history" ]] && safe_find_delete "$HOME/.claude/file-history" "*" "$MOLE_LOG_AGE_DAYS" "d"
-    [[ -d "$HOME/.claude/session-env" ]] && safe_find_delete "$HOME/.claude/session-env" "*" "$MOLE_LOG_AGE_DAYS" "f"
-    [[ -d "$HOME/.claude/shell-snapshots" ]] && safe_find_delete "$HOME/.claude/shell-snapshots" "*" "$MOLE_LOG_AGE_DAYS" "f"
+    # Claude Code state under ~/.claude can include persistent memory,
+    # plugin registry data, hooks, and session context. Do not clean it
+    # automatically; users can remove specific paths manually if needed.
     # Wondershare orphan installer payload (bundle ID differs from live app)
     safe_clean ~/Library/Application\ Support/com.wondershare.Installer/* "Wondershare installer payload"
 }

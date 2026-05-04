@@ -170,6 +170,29 @@ TouchID sudo check|check_touchid|config_check
 Rosetta 2 check|check_rosetta|config_check
 Git configuration check|check_git_config|config_check
 Login items check|check_login_items|config_check
+DNS & Spotlight Check|system_maintenance|optimize_task
+Finder Cache Refresh|cache_refresh|optimize_task
+App State Cleanup|saved_state_cleanup|optimize_task
+Broken Config Repair|fix_broken_configs|optimize_task
+Network Cache Refresh|network_optimization|optimize_task
+Database Optimization|sqlite_vacuum|optimize_task
+LaunchServices Repair|launch_services_rebuild|optimize_task
+Font Cache Rebuild|font_cache_rebuild|optimize_task
+Dock Refresh|dock_refresh|optimize_task
+Prevent Finder .DS_Store|prevent_network_dsstore|optimize_task
+Memory Optimization|memory_pressure_relief|optimize_task
+Network Stack Refresh|network_stack_optimize|optimize_task
+Permission Repair|disk_permissions_repair|optimize_task
+Bluetooth Refresh|bluetooth_reset|optimize_task
+Spotlight Optimization|spotlight_index_optimize|optimize_task
+Periodic Maintenance|periodic_maintenance|optimize_task
+Shared File Lists|shared_file_list_repair|optimize_task
+Disk Health|disk_verify|optimize_task
+Login Items Audit|login_items_audit|optimize_task
+Quarantine Database Cleanup|quarantine_cleanup|optimize_task
+Launch Agents Cleanup|launch_agents_cleanup|optimize_task
+Notifications|notification_cleanup|optimize_task
+Usage Data|coreduet_cleanup|optimize_task
 EOF
 }
 
@@ -288,7 +311,7 @@ manage_whitelist_categories() {
         items_source=$(get_optimize_whitelist_items)
         active_config_file="$WHITELIST_CONFIG_OPTIMIZE"
         local display_config="${active_config_file/#$HOME/~}"
-        menu_title="Whitelist Manager, Select system checks to ignore
+        menu_title="Whitelist Manager, Select system checks or optimize tasks to ignore
 ${GRAY}Edit: ${display_config}${NC}"
     else
         items_source=$(get_all_cache_items)

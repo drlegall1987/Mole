@@ -87,6 +87,31 @@ is_memory_pressure_high() {
     return 1
 }
 
+has_active_vpn_interface() {
+    case "${MOLE_ASSUME_VPN_ACTIVE:-}" in
+        1 | true | TRUE | yes | YES)
+            return 0
+            ;;
+        0 | false | FALSE | no | NO)
+            return 1
+            ;;
+    esac
+
+    if command -v netstat > /dev/null 2>&1; then
+        if netstat -rn -f inet 2> /dev/null | grep -Eq '[[:space:]]utun[0-9]+($|[[:space:]])'; then
+            return 0
+        fi
+    fi
+
+    if command -v ifconfig > /dev/null 2>&1; then
+        if ifconfig 2> /dev/null | grep -Eq '^utun[0-9]+:.*<[^>]*(UP|RUNNING)'; then
+            return 0
+        fi
+    fi
+
+    return 1
+}
+
 flush_dns_cache() {
     if [[ "${MOLE_DRY_RUN:-0}" == "1" ]]; then
         MOLE_DNS_FLUSHED=1
@@ -611,6 +636,11 @@ opt_memory_pressure_relief() {
 opt_network_stack_optimize() {
     local route_flushed="false"
     local arp_flushed="false"
+
+    if has_active_vpn_interface; then
+        opt_msg "Network stack refresh skipped, active VPN detected"
+        return 0
+    fi
 
     if [[ "${MOLE_DRY_RUN:-0}" != "1" ]]; then
         local route_ok=true
@@ -1160,11 +1190,34 @@ _login_item_app_exists() {
     if [[ "$stripped" != "$nospace" ]] && mdfind "kMDItemFSName == '${stripped}.app'" 2> /dev/null | grep -q .; then
         return 0
     fi
-    # 4. Fallback: check sfltool dumpbtm for the actual on-disk path.
+    # 4. Recursive filesystem fallback for nested helper apps inside parent
+    #    bundles. Spotlight often misses helpers under Contents/.
+    local candidate roots app_name
+    local -a app_names=("${name}.app")
+    [[ "$nospace" != "$name" ]] && app_names+=("${nospace}.app")
+    [[ "$stripped" != "$nospace" ]] && app_names+=("${stripped}.app")
+    for roots in "/Applications" "$HOME/Applications"; do
+        [[ -d "$roots" ]] || continue
+        for app_name in "${app_names[@]}"; do
+            candidate=$(command find "$roots" -maxdepth 6 -type d -name "$app_name" -print -quit 2> /dev/null || true)
+            if [[ -n "$candidate" && -d "$candidate" ]]; then
+                return 0
+            fi
+        done
+    done
+    # 5. Fallback: check sfltool dumpbtm for the actual on-disk path.
     #    Nested helper apps (e.g. DBnginMenuHelper.app inside DBngin.app) are
     #    invisible to mdfind but still have a valid URL in the BTM database.
     local btm_path
-    btm_path=$(sfltool dumpbtm 2> /dev/null | grep -i "${name}" | grep -oE '/[^ ]+\.app' | head -1)
+    btm_path=$(sfltool dumpbtm 2> /dev/null | awk -v item="$name" '
+        BEGIN { IGNORECASE = 1 }
+        index($0, item) {
+            if (match($0, "/.*\\.app")) {
+                print substr($0, RSTART, RLENGTH)
+                exit
+            }
+        }
+    ')
     if [[ -n "$btm_path" ]] && [[ -e "$btm_path" ]]; then
         return 0
     fi
@@ -1217,6 +1270,11 @@ opt_login_items_audit() {
 execute_optimization() {
     local action="$1"
     local path="${2:-}"
+
+    if command -v is_whitelisted > /dev/null && is_whitelisted "$action"; then
+        opt_msg "Skipped (whitelisted): $action"
+        return 0
+    fi
 
     case "$action" in
         system_maintenance) opt_system_maintenance ;;
