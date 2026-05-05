@@ -216,14 +216,18 @@ type Collector struct {
 	lastBT   []BluetoothDevice
 
 	// Fast metrics (1s).
-	prevNet      map[string]net.IOCountersStat
-	lastNetAt    time.Time
-	rxHistoryBuf *RingBuffer
-	txHistoryBuf *RingBuffer
-	lastGPUAt    time.Time
-	cachedGPU    []GPUStatus
-	prevDiskIO   disk.IOCountersStat
-	lastDiskAt   time.Time
+	prevNet        map[string]net.IOCountersStat
+	lastNetAt      time.Time
+	rxHistoryBuf   *RingBuffer
+	txHistoryBuf   *RingBuffer
+	lastNetIPAt    time.Time
+	cachedNetIPs   map[string]string
+	lastGPUAt      time.Time
+	cachedGPU      []GPUStatus
+	lastGPUUsageAt time.Time
+	cachedGPUUsage float64
+	prevDiskIO     disk.IOCountersStat
+	lastDiskAt     time.Time
 
 	watchMu        sync.Mutex
 	processWatch   ProcessWatchConfig
@@ -231,13 +235,16 @@ type Collector struct {
 }
 
 func NewCollector(options ProcessWatchOptions) *Collector {
-	return &Collector{
+	c := &Collector{
 		prevNet:        make(map[string]net.IOCountersStat),
 		rxHistoryBuf:   NewRingBuffer(NetworkHistorySize),
 		txHistoryBuf:   NewRingBuffer(NetworkHistorySize),
+		cachedNetIPs:   make(map[string]string),
 		processWatch:   options.SnapshotConfig(),
 		processWatcher: NewProcessWatcher(options),
 	}
+	c.primeNetworkCounters(time.Now())
+	return c
 }
 
 func (c *Collector) Collect() (MetricsSnapshot, error) {
@@ -391,9 +398,32 @@ var commandExists = func(name string) bool {
 	if name == "" {
 		return false
 	}
+
+	commandExistsCacheMu.Lock()
+	if exists, ok := commandExistsCache[name]; ok {
+		commandExistsCacheMu.Unlock()
+		return exists
+	}
+	commandExistsCacheMu.Unlock()
+
+	exists := lookPathExists(name)
+
+	commandExistsCacheMu.Lock()
+	commandExistsCache[name] = exists
+	commandExistsCacheMu.Unlock()
+	return exists
+}
+
+var (
+	commandExistsCacheMu sync.Mutex
+	commandExistsCache   = make(map[string]bool)
+)
+
+func lookPathExists(name string) (exists bool) {
 	defer func() {
-		// Treat LookPath panics as "missing".
-		_ = recover()
+		if recover() != nil {
+			exists = false
+		}
 	}()
 	_, err := exec.LookPath(name)
 	return err == nil

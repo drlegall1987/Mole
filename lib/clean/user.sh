@@ -171,10 +171,15 @@ is_google_chrome_running() {
 }
 
 clean_chrome_old_versions() {
-    local -a app_paths=(
-        "/Applications/Google Chrome.app"
-        "$HOME/Applications/Google Chrome.app"
-    )
+    local -a app_paths
+    if [[ -n "${MOLE_CHROME_APP_PATHS:-}" ]]; then
+        IFS=':' read -ra app_paths <<< "$MOLE_CHROME_APP_PATHS"
+    else
+        app_paths=(
+            "/Applications/Google Chrome.app"
+            "$HOME/Applications/Google Chrome.app"
+        )
+    fi
 
     if is_google_chrome_running; then
         echo -e "  ${GRAY}${ICON_WARNING}${NC} Google Chrome running · old versions cleanup skipped"
@@ -440,10 +445,15 @@ clean_edge_updater_old_versions() {
 
 # Remove old Brave Browser versions while keeping Current.
 clean_brave_old_versions() {
-    local -a app_paths=(
-        "/Applications/Brave Browser.app"
-        "$HOME/Applications/Brave Browser.app"
-    )
+    local -a app_paths
+    if [[ -n "${MOLE_BRAVE_APP_PATHS:-}" ]]; then
+        IFS=':' read -ra app_paths <<< "$MOLE_BRAVE_APP_PATHS"
+    else
+        app_paths=(
+            "/Applications/Brave Browser.app"
+            "$HOME/Applications/Brave Browser.app"
+        )
+    fi
 
     # Match the exact Brave process name to avoid false positives
     if pgrep -x "Brave Browser" > /dev/null 2>&1; then
@@ -705,6 +715,11 @@ clean_app_caches() {
     safe_clean ~/Library/Containers/com.apple.CoreDevice.CoreDeviceService/Data/Library/Caches/* "CoreDevice service cache"
     safe_clean ~/Library/Containers/com.apple.NeptuneOneExtension/Data/Library/Caches/* "Apple Intelligence extension cache"
     safe_clean ~/Library/Containers/com.apple.AppleMediaServicesUI.UtilityExtension/Data/tmp/* "Apple Media Services temp files"
+    safe_clean ~/Library/Caches/com.apple.AppleMediaServices/* "Apple Media Services cache"
+    safe_clean ~/Library/Caches/com.apple.duetexpertd/* "Duet Expert cache"
+    safe_clean ~/Library/Caches/com.apple.parsecd/* "Parsecd cache"
+    safe_clean ~/Library/Caches/com.apple.python/* "Apple Python cache"
+    safe_clean ~/Library/Caches/com.apple.e5rt.e5bundlecache/* "Apple Intelligence runtime cache"
     local containers_dir="$HOME/Library/Containers"
     [[ ! -d "$containers_dir" ]] && return 0
     start_section_spinner "Scanning sandboxed apps..."
