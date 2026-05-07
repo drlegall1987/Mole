@@ -347,11 +347,6 @@ clean_orphaned_app_data() {
         "$HOME/Library/Caches|Caches|com.*:org.*:net.*:io.*"
         "$HOME/Library/Logs|Logs|com.*:org.*:net.*:io.*"
         "$HOME/Library/Saved Application State|States|*.savedState"
-        "$HOME/Library/WebKit|WebKit|com.*:org.*:net.*:io.*"
-        "$HOME/Library/HTTPStorages|HTTP|com.*:org.*:net.*:io.*"
-        "$HOME/Library/Cookies|Cookies|*.binarycookies"
-        "$HOME/Library/Application Support|AppSupport|com.*:org.*:net.*:io.*"
-        "$HOME/Library/Preferences|Prefs|com.*:org.*:net.*:io.*"
     )
     for resource_type in "${resource_types[@]}"; do
         IFS='|' read -r base_path label patterns <<< "$resource_type"
@@ -843,14 +838,19 @@ clean_orphaned_container_stubs() {
                 # These directories have already passed the narrow stub-only
                 # checks above. Use direct removal so broad app-protection rules
                 # for the parent vendor bundle do not keep empty metadata stubs.
+                # safe_remove cannot be used here: it runs should_protect_path
+                # which intentionally vetos vendor-bundle paths we just verified.
                 if command rm -rf -- "$container_dir" > /dev/null 2>&1; then # SAFE: verified stub-only container
                     removed_count=$((removed_count + 1))
+                    log_operation "${MOLE_CURRENT_COMMAND:-clean}" "REMOVED" "$container_dir" "stub-container"
                 else
                     debug_log "Failed to remove stub container: $container_dir"
                     failed_count=$((failed_count + 1))
+                    log_operation "${MOLE_CURRENT_COMMAND:-clean}" "FAILED" "$container_dir" "stub-container"
                 fi
             else
                 removed_count=$((removed_count + 1))
+                log_operation "${MOLE_CURRENT_COMMAND:-clean}" "SKIPPED" "$container_dir" "dry-run stub-container"
             fi
         done
     done

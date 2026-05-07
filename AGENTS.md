@@ -58,6 +58,7 @@ Public docs and examples should prefer the installed `mo` command. Use `./mole` 
 - Keep shell code formatted with `./scripts/check.sh --format`.
 - Prefer targeted Bats tests during development; run the full suite before committing.
 - Do not add AI attribution trailers to commits.
+- `start_section` / `end_section` / `note_activity` have three intentionally different implementations in `lib/core/base.sh`, `bin/clean.sh`, and `bin/purge.sh`. Source order decides which one wins, and the wording, color, and dry-run export semantics differ on purpose. Read the cross-reference comment in `lib/core/base.sh` before changing any of them.
 
 ## Command Surface
 
@@ -66,6 +67,7 @@ Public docs and examples should prefer the installed `mo` command. Use `./mole` 
 - `mo optimize` - maintenance and diagnostics, with `--whitelist` support.
 - `mo analyze` / `mo analyse` - Go disk explorer; safer for ad hoc cleanup because it uses Trash routing.
 - `mo status` - live health dashboard and JSON output for automation.
+- `mo check` / `mo doctor` - run system diagnostics (updates, health, security, config, dev environment) with optional auto-fix prompts.
 - `mo purge` - project build artifact cleanup, with configurable scan paths through `mo purge --paths`.
 - `mo installer` - installer-file discovery and cleanup.
 - `mo completion`, `mo touchid`, `mo update`, and `mo remove` manage shell integration, sudo auth convenience, updates, and uninstalling Mole itself.
